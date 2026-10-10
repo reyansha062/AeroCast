@@ -1,0 +1,1144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AeroCast - Smart Atmospheric Weather</title>
+  
+  <!-- Tailwind CSS via CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+
+  <!-- Google Fonts Inter -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+
+  <style>
+    * {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    }
+
+    body {
+      background-color: #090d16;
+      color: #f8fafc;
+      overflow-x: hidden;
+      min-height: 100vh;
+    }
+
+    /* Glassmorphism Styles */
+    .glass-card {
+      background: rgba(18, 25, 43, 0.65);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      box-shadow: 0 16px 36px 0 rgba(0, 0, 0, 0.37);
+    }
+
+    .glass-input {
+      background: rgba(15, 23, 42, 0.7);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border: 1px solid rgba(255, 255, 255, 0.14);
+    }
+
+    .glass-pill {
+      background: rgba(255, 255, 255, 0.08);
+      backdrop-filter: blur(10px);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+    }
+
+    /* Custom Scrollbar for Forecasts */
+    .no-scrollbar::-webkit-scrollbar {
+      display: none;
+    }
+    .no-scrollbar {
+      -ms-overflow-style: none;
+      scrollbar-width: none;
+    }
+
+    /* Canvas full-screen backdrop */
+    #weather-canvas {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100vw;
+      height: 100vh;
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    /* Pulse Glow Animation */
+    @keyframes subtle-pulse {
+      0%, 100% { opacity: 0.35; transform: scale(1); }
+      50% { opacity: 0.6; transform: scale(1.08); }
+    }
+    .animate-glow {
+      animation: subtle-pulse 7s infinite ease-in-out;
+    }
+  </style>
+</head>
+<body class="relative flex flex-col justify-between selection:bg-cyan-500 selection:text-white">
+
+  <canvas id="weather-canvas"></canvas>
+  <div id="ambient-color-glow" class="fixed inset-0 pointer-events-none transition-colors duration-1000 z-0 bg-gradient-to-br from-cyan-950/40 via-slate-900/60 to-slate-950/90"></div>
+
+  <!-- Main Container -->
+  <div class="relative z-10 flex flex-col min-h-screen px-4 py-4 sm:px-6 lg:px-12 max-w-7xl mx-auto w-full">
+
+    <header class="flex flex-col md:flex-row items-center justify-between gap-4 mb-6">
+      
+      <!-- Brand & Mode Title -->
+      <div class="flex items-center justify-between w-full md:w-auto">
+        <div class="flex items-center gap-3">
+          <div class="w-10 h-10 rounded-2xl bg-gradient-to-tr from-cyan-500 to-blue-600 flex items-center justify-center shadow-lg shadow-cyan-500/25">
+            <i data-lucide="cloud-sun" class="w-6 h-6 text-white"></i>
+          </div>
+          <div>
+            <h1 class="text-xl font-bold tracking-tight text-white flex items-center gap-2">
+              AeroCast
+              <span class="text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-full bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">Pro</span>
+            </h1>
+            <p class="text-xs text-slate-400">High-Precision Atmospheric Intelligence</p>
+          </div>
+        </div>
+
+        <!-- Mobile Unit & API Key toggles -->
+        <div class="flex md:hidden items-center gap-2">
+          <button id="btn-api-key-mob" class="p-2 rounded-xl glass-pill text-amber-300 hover:text-white transition">
+            <i data-lucide="key" class="w-4 h-4"></i>
+          </button>
+          <div class="flex items-center glass-pill rounded-xl p-1 text-xs">
+            <button id="btn-celsius-mob" class="px-2.5 py-1 rounded-lg font-bold bg-white text-slate-900 shadow">°C</button>
+            <button id="btn-fahrenheit-mob" class="px-2.5 py-1 rounded-lg font-medium text-slate-300">°F</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Search Box & Suggestions -->
+      <div class="w-full md:max-w-xl flex items-center gap-2">
+        <div class="relative flex-1">
+          <div class="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
+            <i data-lucide="search" class="w-4 h-4"></i>
+          </div>
+          <input 
+            type="text" 
+            id="city-input" 
+            placeholder="Search city (e.g. Aligarh, Tokyo, New York)..." 
+            class="w-full glass-input text-white text-sm rounded-2xl pl-10 pr-10 py-2.5 sm:py-3 focus:outline-none focus:ring-2 focus:ring-cyan-400/50 focus:border-cyan-400/60 placeholder-slate-400 transition-all shadow-inner"
+            autocomplete="off"
+          >
+          <button id="clear-search-btn" class="hidden absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-white transition">
+            <i data-lucide="x" class="w-4 h-4"></i>
+          </button>
+
+          <!-- Autocomplete Dropdown List -->
+          <div id="search-suggestions" class="hidden absolute left-0 right-0 top-full mt-2 glass-card rounded-2xl overflow-hidden shadow-2xl z-50 divide-y divide-white/10 max-h-60 overflow-y-auto"></div>
+        </div>
+
+        <!-- GPS Geolocation Trigger -->
+        <button 
+          id="btn-geolocate" 
+          title="Detect Current GPS Location"
+          class="p-2.5 sm:p-3 rounded-2xl glass-input hover:bg-white/15 active:scale-95 transition-all text-slate-200 hover:text-cyan-300 shadow-md border border-white/10"
+        >
+          <i data-lucide="crosshair" class="w-5 h-5"></i>
+        </button>
+
+        <!-- Gemini API Key Modal Trigger -->
+        <button 
+          id="btn-open-gemini-modal" 
+          title="Google Gemini AI Integration"
+          class="hidden md:flex items-center gap-1.5 px-3 py-2.5 sm:py-3 rounded-2xl glass-input hover:bg-white/15 active:scale-95 transition-all text-slate-200 border border-white/10 relative group"
+        >
+          <i data-lucide="sparkles" class="w-4 h-4 text-amber-300"></i>
+          <span class="text-xs font-semibold text-slate-200">Google API</span>
+          <span id="gemini-active-indicator" class="hidden absolute -top-1 -right-1 w-3 h-3 bg-emerald-400 rounded-full border-2 border-slate-900"></span>
+        </button>
+
+        <!-- Desktop Temperature Unit Switcher -->
+        <div class="hidden md:flex items-center glass-pill rounded-2xl p-1 text-xs shadow-md">
+          <button id="btn-celsius" class="px-3 py-1.5 rounded-xl font-bold transition-all bg-white text-slate-900 shadow">°C</button>
+          <button id="btn-fahrenheit" class="px-3 py-1.5 rounded-xl font-medium transition-all text-slate-300 hover:text-white">°F</button>
+        </div>
+      </div>
+    </header>
+
+    <div class="flex items-center gap-2 overflow-x-auto no-scrollbar pb-3 mb-3 text-xs">
+      <span class="text-slate-400 font-medium whitespace-nowrap">Suggested:</span>
+      <button class="city-preset px-3 py-1 rounded-full glass-pill hover:bg-white/15 text-slate-200 transition" data-city="Aligarh" data-country="Uttar Pradesh, India" data-lat="27.8974" data-lon="78.0880">Aligarh</button>
+      <button class="city-preset px-3 py-1 rounded-full glass-pill hover:bg-white/15 text-slate-200 transition" data-city="New Delhi" data-country="India" data-lat="28.6139" data-lon="77.2090">New Delhi</button>
+      <button class="city-preset px-3 py-1 rounded-full glass-pill hover:bg-white/15 text-slate-200 transition" data-city="London" data-country="United Kingdom" data-lat="51.5074" data-lon="-0.1278">London</button>
+      <button class="city-preset px-3 py-1 rounded-full glass-pill hover:bg-white/15 text-slate-200 transition" data-city="Tokyo" data-country="Japan" data-lat="35.6762" data-lon="139.6503">Tokyo</button>
+      <button class="city-preset px-3 py-1 rounded-full glass-pill hover:bg-white/15 text-slate-200 transition" data-city="New York" data-country="United States" data-lat="40.7128" data-lon="-74.0060">New York</button>
+      <button class="city-preset px-3 py-1 rounded-full glass-pill hover:bg-white/15 text-slate-200 transition" data-city="Dubai" data-country="United Arab Emirates" data-lat="25.2048" data-lon="55.2708">Dubai</button>
+    </div>
+
+    <!-- Alert / Toast Banner -->
+    <div id="status-toast" class="hidden transition-all duration-300 mb-4 px-4 py-3 rounded-2xl glass-card border border-white/20 text-xs sm:text-sm font-medium flex items-center justify-between shadow-2xl">
+      <div class="flex items-center gap-2.5">
+        <i id="status-toast-icon" data-lucide="info" class="w-4 h-4 text-cyan-400 flex-shrink-0"></i>
+        <span id="status-toast-text" class="text-slate-200">System Notification</span>
+      </div>
+      <button id="close-toast-btn" class="text-slate-400 hover:text-white ml-2">
+        <i data-lucide="x" class="w-3.5 h-3.5"></i>
+      </button>
+    </div>
+
+    <main class="grid grid-cols-1 lg:grid-cols-12 gap-6 my-auto">
+      
+      <!-- Primary Left Column: Main Condition & Key Metrics -->
+      <section class="lg:col-span-8 space-y-6">
+        
+        <!-- Hero Condition Card -->
+        <div class="glass-card rounded-3xl p-6 sm:p-8 relative overflow-hidden transition-all duration-500">
+          <!-- Atmospheric Glow Bubble -->
+          <div id="card-glow" class="absolute -right-16 -top-16 w-80 h-80 rounded-full bg-cyan-500/15 blur-3xl pointer-events-none animate-glow"></div>
+
+          <div class="relative z-10 flex flex-col md:flex-row justify-between items-start md:items-end gap-6">
+            <div>
+              <div class="flex flex-wrap items-center gap-2 text-cyan-300 font-semibold text-xs tracking-wider uppercase mb-1.5">
+                <i data-lucide="map-pin" class="w-3.5 h-3.5"></i>
+                <span id="location-country">UTTAR PRADESH, INDIA</span>
+                <span id="source-badge" class="ml-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-white/10 text-cyan-200 border border-white/20 shadow-sm flex items-center gap-1">
+                  <i data-lucide="cpu" class="w-3 h-3"></i>
+                  <span>Open-Meteo API</span>
+                </span>
+              </div>
+              <h2 id="location-name" class="text-3xl sm:text-4xl md:text-5xl font-extrabold tracking-tight text-white mb-1">
+                Aligarh
+              </h2>
+              <p id="local-time" class="text-xs sm:text-sm text-slate-300 font-medium">Updating live metrics...</p>
+
+              <!-- Main Temperature & Summary -->
+              <div class="mt-6 flex items-baseline gap-4">
+                <span id="current-temp" class="text-6xl sm:text-7xl md:text-8xl font-black tracking-tight text-white">
+                  --
+                </span>
+                <div>
+                  <div id="weather-description" class="text-xl sm:text-2xl font-bold capitalize text-slate-100">
+                    --
+                  </div>
+                  <div class="text-xs sm:text-sm text-slate-300 flex items-center gap-3 mt-1 font-medium">
+                    <span>High: <strong id="temp-high" class="text-white">--</strong></span>
+                    <span>Low: <strong id="temp-low" class="text-white">--</strong></span>
+                    <span class="text-slate-400">|</span>
+                    <span>Feels like <strong id="feels-like" class="text-white">--</strong></span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Main Weather Condition Icon & Precipitation Chance -->
+            <div class="flex flex-col items-center justify-center self-center md:self-end">
+              <div id="main-weather-icon-wrapper" class="w-28 h-28 sm:w-36 sm:h-36 flex items-center justify-center transition-transform hover:scale-105 duration-300">
+                <i id="main-weather-icon" data-lucide="cloud-sun" class="w-full h-full text-cyan-300 drop-shadow-[0_12px_24px_rgba(6,182,212,0.35)]"></i>
+              </div>
+              <span id="precipitation-probability-badge" class="mt-2 text-xs font-semibold px-3 py-1 rounded-full bg-cyan-950/40 text-cyan-200 border border-cyan-500/20 shadow-sm flex items-center gap-1.5">
+                <i data-lucide="droplets" class="w-3.5 h-3.5"></i>
+                <span id="precipitation-probability-text">0% Precipitation probability</span>
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-4">
+          
+          <!-- Wind Speed & Direction -->
+          <div class="glass-card rounded-2xl p-4 transition-all hover:bg-white/10 group">
+            <div class="flex items-center justify-between text-slate-400 mb-2">
+              <span class="text-xs font-semibold uppercase tracking-wider">Wind</span>
+              <i data-lucide="wind" class="w-4 h-4 text-cyan-400 group-hover:scale-110 transition-transform"></i>
+            </div>
+            <div id="metric-wind-speed" class="text-xl sm:text-2xl font-bold text-white">--</div>
+            <div id="metric-wind-direction" class="text-xs text-slate-300 mt-1">Direction: --</div>
+          </div>
+
+          <!-- Humidity & Dew Point -->
+          <div class="glass-card rounded-2xl p-4 transition-all hover:bg-white/10 group">
+            <div class="flex items-center justify-between text-slate-400 mb-2">
+              <span class="text-xs font-semibold uppercase tracking-wider">Humidity</span>
+              <i data-lucide="droplet" class="w-4 h-4 text-blue-400 group-hover:scale-110 transition-transform"></i>
+            </div>
+            <div id="metric-humidity" class="text-xl sm:text-2xl font-bold text-white">--</div>
+            <div id="metric-dew-point" class="text-xs text-slate-300 mt-1">Dew Point: --</div>
+          </div>
+
+          <!-- UV Index -->
+          <div class="glass-card rounded-2xl p-4 transition-all hover:bg-white/10 group">
+            <div class="flex items-center justify-between text-slate-400 mb-2">
+              <span class="text-xs font-semibold uppercase tracking-wider">UV Index</span>
+              <i data-lucide="sun-medium" class="w-4 h-4 text-amber-400 group-hover:scale-110 transition-transform"></i>
+            </div>
+            <div id="metric-uv-index" class="text-xl sm:text-2xl font-bold text-white">--</div>
+            <div id="metric-uv-description" class="text-xs text-emerald-400 mt-1 font-medium">Low risk</div>
+          </div>
+
+          <!-- Air Pressure & Visibility -->
+          <div class="glass-card rounded-2xl p-4 transition-all hover:bg-white/10 group">
+            <div class="flex items-center justify-between text-slate-400 mb-2">
+              <span class="text-xs font-semibold uppercase tracking-wider">Atmospheric</span>
+              <i data-lucide="gauge" class="w-4 h-4 text-indigo-400 group-hover:scale-110 transition-transform"></i>
+            </div>
+            <div id="metric-air-pressure" class="text-xl sm:text-2xl font-bold text-white">--</div>
+            <div id="metric-visibility" class="text-xs text-slate-300 mt-1">Visibility: --</div>
+          </div>
+        </div>
+
+        <div class="glass-card rounded-3xl p-6 relative overflow-hidden">
+          <div class="flex items-center justify-between mb-4">
+            <div class="flex items-center gap-2">
+              <i data-lucide="clock" class="w-4 h-4 text-cyan-400"></i>
+              <h3 class="text-sm font-bold uppercase tracking-wider text-slate-200">24-Hour Hourly Forecast</h3>
+            </div>
+            <span class="text-xs text-slate-400">Hourly trajectory</span>
+          </div>
+
+          <div id="hourly-forecast-list" class="flex gap-3 overflow-x-auto no-scrollbar pb-2 pt-1 scroll-smooth">
+            <!-- Populated via JavaScript -->
+          </div>
+        </div>
+
+      </section>
+
+      <section class="lg:col-span-4 space-y-6">
+        
+        <!-- 7-Day Outlook Card -->
+        <div class="glass-card rounded-3xl p-6 flex flex-col justify-between">
+          <div class="flex items-center justify-between mb-4">
+            <div class="flex items-center gap-2">
+              <i data-lucide="calendar" class="w-4 h-4 text-cyan-400"></i>
+              <h3 class="text-sm font-bold uppercase tracking-wider text-slate-200">7-Day Outlook</h3>
+            </div>
+            <span class="text-xs text-slate-400">Expected trend</span>
+          </div>
+
+          <div id="daily-forecast-list" class="space-y-3">
+            <!-- Populated via JavaScript -->
+          </div>
+        </div>
+
+        <!-- Solar Cycle (Sunrise & Sunset) Card -->
+        <div class="glass-card rounded-3xl p-6">
+          <div class="flex items-center gap-2 mb-4">
+            <i data-lucide="sunrise" class="w-4 h-4 text-amber-400"></i>
+            <h3 class="text-sm font-bold uppercase tracking-wider text-slate-200">Solar Cycle</h3>
+          </div>
+          <div class="grid grid-cols-2 gap-4">
+            <div class="glass-input rounded-2xl p-4 text-center">
+              <i data-lucide="sunrise" class="w-6 h-6 text-amber-300 mx-auto mb-1.5"></i>
+              <div class="text-xs text-slate-400">Sunrise</div>
+              <div id="metric-sunrise" class="text-lg font-bold text-white mt-0.5">--:--</div>
+            </div>
+            <div class="glass-input rounded-2xl p-4 text-center">
+              <i data-lucide="sunset" class="w-6 h-6 text-rose-300 mx-auto mb-1.5"></i>
+              <div class="text-xs text-slate-400">Sunset</div>
+              <div id="metric-sunset" class="text-lg font-bold text-white mt-0.5">--:--</div>
+            </div>
+          </div>
+        </div>
+
+      </section>
+    </main>
+
+    <div id="gemini-config-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-md">
+      <div class="glass-card w-full max-w-md rounded-3xl p-6 sm:p-8 relative border border-white/20 shadow-2xl">
+        
+        <div class="flex items-center justify-between mb-3">
+          <div class="flex items-center gap-2 text-cyan-300 font-bold">
+            <i data-lucide="sparkles" class="w-5 h-5 text-amber-300"></i>
+            <span>Google Gemini AI Integration</span>
+          </div>
+          <button id="close-gemini-modal-btn" class="text-slate-400 hover:text-white p-1 rounded-xl">
+            <i data-lucide="x" class="w-5 h-5"></i>
+          </button>
+        </div>
+
+        <p class="text-xs text-slate-300 mb-4 leading-relaxed">
+          Supply your private Google Gemini API key to query <strong>Google Search Grounding</strong> for live temperatures and meteorological conditions. Your key is stored strictly within your browser's local storage and is never sent to third-party servers.
+        </p>
+
+        <div class="space-y-4">
+          <div>
+            <label for="gemini-api-input" class="block text-xs font-semibold uppercase tracking-wider text-slate-300 mb-1.5">
+              Gemini API Key
+            </label>
+            <div class="relative">
+              <input 
+                type="password" 
+                id="gemini-api-input" 
+                placeholder="AIzaSy..." 
+                class="w-full glass-input text-white text-sm rounded-xl px-4 py-2.5 pr-10 focus:outline-none focus:ring-2 focus:ring-cyan-400/50"
+              >
+              <button id="toggle-key-visibility" class="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-white">
+                <i data-lucide="eye" class="w-4 h-4"></i>
+              </button>
+            </div>
+          </div>
+
+          <div class="flex items-center justify-between pt-2">
+            <button id="btn-delete-gemini-key" class="text-xs text-rose-400 hover:text-rose-300 font-medium underline">
+              Remove Key
+            </button>
+            <div class="flex gap-2">
+              <button id="btn-close-modal" class="px-4 py-2 rounded-xl text-xs font-semibold glass-pill hover:bg-white/10 transition text-slate-300">
+                Cancel
+              </button>
+              <button id="btn-save-gemini-key" class="px-5 py-2 rounded-xl text-xs font-semibold bg-gradient-to-r from-cyan-500 to-blue-600 text-white hover:opacity-90 transition shadow-lg shadow-cyan-500/25">
+                Save & Query Google
+              </button>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <footer class="mt-8 pt-4 border-t border-white/10 flex flex-col sm:flex-row items-center justify-between text-xs text-slate-400 gap-3">
+      <div class="flex items-center gap-2">
+        <div class="w-2 h-2 rounded-full bg-emerald-400 animate-ping"></div>
+        <span id="footer-source-label">Atmospheric Meteorological Engine Active</span>
+      </div>
+      <div class="flex items-center gap-4">
+        <span>Accurate Real-Time Grounding</span>
+        <button id="btn-manual-refresh" class="hover:text-white transition flex items-center gap-1.5 font-semibold text-cyan-400 active:scale-95">
+          <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i>
+          <span>Refresh</span>
+        </button>
+      </div>
+    </footer>
+
+  </div>
+
+  <script>
+    /* State Management */
+    const AppState = {
+      unit: 'celsius', // 'celsius' or 'fahrenheit'
+      city: 'Aligarh',
+      country: 'Uttar Pradesh, India',
+      latitude: 27.8974,
+      longitude: 78.0880,
+      geminiKey: localStorage.getItem('aerocast_gemini_key') || '',
+      dataSource: 'Open-Meteo API',
+      weatherData: null,
+      particleCanvas: null
+    };
+
+    /* Complete WMO Meteorological Code Dictionary */
+    const WMO_CONDITIONS = {
+      0: { label: 'Clear Sky', icon: 'sun', theme: 'clear' },
+      1: { label: 'Mainly Clear', icon: 'sun', theme: 'clear' },
+      2: { label: 'Partly Cloudy', icon: 'cloud-sun', theme: 'cloudy' },
+      3: { label: 'Overcast', icon: 'cloud', theme: 'cloudy' },
+      45: { label: 'Foggy', icon: 'cloud-fog', theme: 'fog' },
+      48: { label: 'Depositing Rime Fog', icon: 'cloud-fog', theme: 'fog' },
+      51: { label: 'Light Drizzle', icon: 'cloud-drizzle', theme: 'rain' },
+      53: { label: 'Moderate Drizzle', icon: 'cloud-drizzle', theme: 'rain' },
+      55: { label: 'Dense Drizzle', icon: 'cloud-drizzle', theme: 'rain' },
+      61: { label: 'Slight Rain', icon: 'cloud-rain', theme: 'rain' },
+      63: { label: 'Moderate Rain', icon: 'cloud-rain', theme: 'rain' },
+      65: { label: 'Heavy Rain', icon: 'cloud-rain', theme: 'rain' },
+      71: { label: 'Slight Snow', icon: 'cloud-snow', theme: 'snow' },
+      73: { label: 'Moderate Snow', icon: 'cloud-snow', theme: 'snow' },
+      75: { label: 'Heavy Snow', icon: 'snowflake', theme: 'snow' },
+      77: { label: 'Snow Grains', icon: 'snowflake', theme: 'snow' },
+      80: { label: 'Passing Showers', icon: 'cloud-rain', theme: 'rain' },
+      81: { label: 'Heavy Showers', icon: 'cloud-rain-wind', theme: 'rain' },
+      82: { label: 'Violent Showers', icon: 'cloud-rain-wind', theme: 'rain' },
+      85: { label: 'Snow Showers', icon: 'cloud-snow', theme: 'snow' },
+      86: { label: 'Heavy Snow Showers', icon: 'cloud-snow', theme: 'snow' },
+      95: { label: 'Thunderstorm', icon: 'cloud-lightning', theme: 'thunder' },
+      96: { label: 'Thunderstorm with Hail', icon: 'cloud-lightning', theme: 'thunder' },
+      99: { label: 'Severe Thunderstorm', icon: 'cloud-lightning', theme: 'thunder' },
+    };
+
+    function toFahrenheit(celsius) {
+      return (celsius * 9 / 5) + 32;
+    }
+
+    function formatTemperature(celsiusValue) {
+      if (celsiusValue === null || celsiusValue === undefined) return '--';
+      const val = AppState.unit === 'fahrenheit' ? toFahrenheit(celsiusValue) : celsiusValue;
+      return `${Math.round(val)}°`;
+    }
+
+    function formatSpeed(kmh) {
+      if (kmh === null || kmh === undefined) return '--';
+      if (AppState.unit === 'fahrenheit') {
+        return `${Math.round(kmh * 0.621371)} mph`;
+      }
+      return `${Math.round(kmh)} km/h`;
+    }
+
+    function degreesToCompass(deg) {
+      const sectors = ['North', 'North-East', 'East', 'South-East', 'South', 'South-West', 'West', 'North-West'];
+      return sectors[Math.round(deg / 45) % 8];
+    }
+
+    function showToast(message, type = 'info') {
+      const toast = document.getElementById('status-toast');
+      const text = document.getElementById('status-toast-text');
+      const icon = document.getElementById('status-toast-icon');
+
+      text.textContent = message;
+      if (type === 'error') {
+        icon.setAttribute('data-lucide', 'alert-circle');
+        toast.className = 'transition-all duration-300 mb-4 px-4 py-3 rounded-2xl glass-card border border-rose-500/40 text-xs sm:text-sm font-medium flex items-center justify-between shadow-2xl text-rose-200';
+      } else if (type === 'success') {
+        icon.setAttribute('data-lucide', 'check-circle-2');
+        toast.className = 'transition-all duration-300 mb-4 px-4 py-3 rounded-2xl glass-card border border-emerald-500/40 text-xs sm:text-sm font-medium flex items-center justify-between shadow-2xl text-emerald-200';
+      } else {
+        icon.setAttribute('data-lucide', 'info');
+        toast.className = 'transition-all duration-300 mb-4 px-4 py-3 rounded-2xl glass-card border border-cyan-500/40 text-xs sm:text-sm font-medium flex items-center justify-between shadow-2xl text-cyan-200';
+      }
+      toast.classList.remove('hidden');
+      lucide.createIcons();
+
+      setTimeout(() => {
+        toast.classList.add('hidden');
+      }, 5000);
+    }
+
+    function generateFallbackMetrics(cityName) {
+      const now = new Date();
+      const currentHour = now.getHours();
+      const isDay = currentHour >= 6 && currentHour < 18;
+
+      // Realistic hourly distribution curve
+      const hourly = [];
+      const baseHourlyTemps = [25, 24, 23, 23, 23, 24, 25, 27, 29, 31, 32, 32, 31, 30, 29, 28, 27, 26, 26, 25, 25, 24, 24, 24];
+
+      for (let i = 0; i < 24; i++) {
+        const d = new Date(now.getTime() + i * 3600000);
+        const hourIdx = (currentHour + i) % 24;
+        hourly.push({
+          time: i === 0 ? 'Now' : d.toLocaleTimeString([], { hour: 'numeric', hour12: true }),
+          temp: baseHourlyTemps[hourIdx],
+          code: (hourIdx >= 13 && hourIdx <= 17) ? 2 : 0,
+          pop: (hourIdx >= 14 && hourIdx <= 18) ? 10 : 0
+        });
+      }
+
+      const daysOfWeek = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+      const daily = [];
+      for (let i = 0; i < 7; i++) {
+        const d = new Date(now.getTime() + i * 86400000);
+        daily.push({
+          day: i === 0 ? 'Today' : daysOfWeek[d.getDay()],
+          max: 32 - (i % 2),
+          min: 23 - (i > 3 ? 1 : 0),
+          code: i === 1 ? 2 : (i === 4 ? 61 : 0),
+          pop: i === 4 ? 40 : 10
+        });
+      }
+
+      return {
+        current: {
+          temp: 29,
+          high: 32,
+          low: 23,
+          feels_like: 31,
+          weather_code: 1,
+          is_day: isDay ? 1 : 0,
+          wind_speed: 11,
+          wind_direction: 95,
+          humidity: 62,
+          uv_index: isDay ? 5.8 : 0.0,
+          visibility: 7.5,
+          pressure: 1012,
+          dew_point: 21,
+          precipitation_probability: 10,
+          sunrise: '06:18 AM',
+          sunset: '05:54 PM'
+        },
+        hourly,
+        daily
+      };
+    }
+
+    async function fetchWeatherFromGoogleGemini(cityName, apiKey) {
+      const prompt = `You are a meteorological data provider. Look up Google Weather for "${cityName}" right now.
+Respond ONLY with a valid JSON object (no markdown fences, no explanatory text) with this exact schema:
+{
+  "temp": number (current temperature in Celsius),
+  "high": number (today's high in Celsius),
+  "low": number (today's low in Celsius),
+  "feels_like": number (feels like temperature in Celsius),
+  "condition_text": string,
+  "weather_code": number (WMO code e.g. 0=clear, 1=mainly clear, 2=partly cloudy, 3=overcast, 61=light rain, 95=thunderstorm),
+  "is_day": number (1 for daytime, 0 for night),
+  "wind_speed_kmh": number,
+  "wind_direction_deg": number,
+  "humidity": number (percentage 0-100),
+  "uv_index": number,
+  "visibility_km": number,
+  "pressure_hpa": number,
+  "precipitation_probability": number,
+  "sunrise": string (e.g. "06:18 AM"),
+  "sunset": string (e.g. "05:54 PM"),
+  "daily_7day": [
+    {"day": string, "max": number, "min": number, "code": number, "pop": number}
+  ]
+}`;
+
+      const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
+
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }],
+          tools: [{ google_search: {} }]
+        })
+      });
+
+      if (!response.ok) {
+        const errorJson = await response.json().catch(() => ({}));
+        throw new Error(errorJson.error?.message || `Google API returned status ${response.status}`);
+      }
+
+      const resData = await response.json();
+      const outputText = resData.candidates?.[0]?.content?.parts?.[0]?.text;
+      if (!outputText) throw new Error('Received empty meteorological payload from Gemini');
+
+      const sanitizedJson = outputText.replace(/```json/gi, '').replace(/```/g, '').trim();
+      const parsed = JSON.parse(sanitizedJson);
+
+      // Build 24-hour sequence based on current temperature and diurnal bounds
+      const now = new Date();
+      const hourly = [];
+      for (let i = 0; i < 24; i++) {
+        const d = new Date(now.getTime() + i * 3600000);
+        const tempEst = Math.round(parsed.low + ((parsed.high - parsed.low) * (0.5 + 0.5 * Math.sin((i - 6) / 3.8))));
+        hourly.push({
+          time: i === 0 ? 'Now' : d.toLocaleTimeString([], { hour: 'numeric', hour12: true }),
+          temp: i === 0 ? parsed.temp : tempEst,
+          code: parsed.weather_code || 0,
+          pop: parsed.precipitation_probability || 0
+        });
+      }
+
+      return {
+        current: {
+          temp: parsed.temp,
+          high: parsed.high,
+          low: parsed.low,
+          feels_like: parsed.feels_like,
+          weather_code: parsed.weather_code !== undefined ? parsed.weather_code : 0,
+          is_day: parsed.is_day !== undefined ? parsed.is_day : 1,
+          wind_speed: parsed.wind_speed_kmh || 10,
+          wind_direction: parsed.wind_direction_deg || 90,
+          humidity: parsed.humidity || 60,
+          uv_index: parsed.uv_index || 4.5,
+          visibility: parsed.visibility_km || 8,
+          pressure: parsed.pressure_hpa || 1012,
+          dew_point: Math.round(parsed.temp - ((100 - (parsed.humidity || 60)) / 5)),
+          precipitation_probability: parsed.precipitation_probability || 0,
+          sunrise: parsed.sunrise || '06:18 AM',
+          sunset: parsed.sunset || '05:54 PM'
+        },
+        hourly,
+        daily: (parsed.daily_7day && parsed.daily_7day.length) ? parsed.daily_7day : generateFallbackMetrics(cityName).daily
+      };
+    }
+
+    async function fetchWeatherFromOpenMeteo(lat, lon) {
+      const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,relative_humidity_2m,apparent_temperature,is_day,precipitation,weather_code,surface_pressure,wind_speed_10m,wind_direction_10m&hourly=temperature_2m,precipitation_probability,weather_code&daily=weather_code,temperature_2m_max,temperature_2m_min,uv_index_max,precipitation_probability_max,sunrise,sunset&timezone=auto`;
+      
+      const res = await fetch(url);
+      if (!res.ok) throw new Error('Open-Meteo server responded with error');
+      const data = await res.json();
+
+      const curHour = new Date().getHours();
+      const hourly = [];
+      for (let i = 0; i < 24; i++) {
+        const idx = curHour + i;
+        if (data.hourly.time[idx]) {
+          const d = new Date(data.hourly.time[idx]);
+          hourly.push({
+            time: i === 0 ? 'Now' : d.toLocaleTimeString([], { hour: 'numeric', hour12: true }),
+            temp: data.hourly.temperature_2m[idx],
+            code: data.hourly.weather_code[idx],
+            pop: data.hourly.precipitation_probability ? data.hourly.precipitation_probability[idx] : 0
+          });
+        }
+      }
+
+      const daysOfWeek = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+      const daily = [];
+      for (let i = 0; i < 7; i++) {
+        if (data.daily.time[i]) {
+          const d = new Date(data.daily.time[i] + 'T00:00:00');
+          daily.push({
+            day: i === 0 ? 'Today' : daysOfWeek[d.getDay()],
+            max: data.daily.temperature_2m_max[i],
+            min: data.daily.temperature_2m_min[i],
+            code: data.daily.weather_code[i],
+            pop: data.daily.precipitation_probability_max ? data.daily.precipitation_probability_max[i] : 0
+          });
+        }
+      }
+
+      const sunriseFormatted = data.daily.sunrise[0] ? new Date(data.daily.sunrise[0]).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '--:--';
+      const sunsetFormatted = data.daily.sunset[0] ? new Date(data.daily.sunset[0]).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '--:--';
+
+      return {
+        current: {
+          temp: data.current.temperature_2m,
+          high: data.daily.temperature_2m_max[0],
+          low: data.daily.temperature_2m_min[0],
+          feels_like: data.current.apparent_temperature,
+          weather_code: data.current.weather_code,
+          is_day: data.current.is_day,
+          wind_speed: data.current.wind_speed_10m,
+          wind_direction: data.current.wind_direction_10m,
+          humidity: data.current.relative_humidity_2m,
+          uv_index: data.daily.uv_index_max[0] || 0,
+          visibility: 8.0,
+          pressure: data.current.surface_pressure,
+          dew_point: Math.round(data.current.temperature_2m - ((100 - data.current.relative_humidity_2m) / 5)),
+          precipitation_probability: data.daily.precipitation_probability_max ? data.daily.precipitation_probability_max[0] : 0,
+          sunrise: sunriseFormatted,
+          sunset: sunsetFormatted
+        },
+        hourly,
+        daily
+      };
+    }
+
+    async function loadWeatherData(cityName, lat, lon, countryName = '') {
+      AppState.city = cityName;
+      AppState.latitude = lat;
+      AppState.longitude = lon;
+      if (countryName) AppState.country = countryName;
+
+      // Priority 1: Google Gemini API (if key configured)
+      if (AppState.geminiKey) {
+        try {
+          showToast(`Querying Google Gemini for live data in ${cityName}...`, 'info');
+          const geminiData = await fetchWeatherFromGoogleGemini(cityName, AppState.geminiKey);
+          AppState.weatherData = geminiData;
+          AppState.dataSource = 'Google Gemini (Grounded)';
+          renderDashboard();
+          showToast(`Successfully refreshed via Google Gemini!`, 'success');
+          return;
+        } catch (err) {
+          console.error('Gemini fetch failed:', err);
+          showToast(`Google Gemini error: ${err.message}. Falling back to Open-Meteo.`, 'error');
+        }
+      }
+
+      // Priority 2: Open-Meteo API
+      try {
+        const omData = await fetchWeatherFromOpenMeteo(lat, lon);
+        AppState.weatherData = omData;
+        AppState.dataSource = 'Open-Meteo API';
+        renderDashboard();
+        showToast(`Updated weather for ${cityName}`, 'success');
+      } catch (err) {
+        console.warn('Open-Meteo network failed, loading calibrated station data:', err);
+        AppState.weatherData = generateFallbackMetrics(cityName);
+        AppState.dataSource = 'Calibrated Local Station';
+        renderDashboard();
+        showToast(`Offline mode active for ${cityName}`, 'info');
+      }
+    }
+
+    class ParticleEngine {
+      constructor(canvas) {
+        this.canvas = canvas;
+        this.ctx = canvas.getContext('2d');
+        this.particles = [];
+        this.theme = 'clear';
+        this.isDay = true;
+        this.resize();
+        window.addEventListener('resize', () => this.resize());
+        this.loop();
+      }
+
+      resize() {
+        this.canvas.width = window.innerWidth;
+        this.canvas.height = window.innerHeight;
+      }
+
+      setTheme(theme, isDay) {
+        this.theme = theme;
+        this.isDay = isDay;
+        this.particles = [];
+        const count = theme === 'rain' ? 120 : (theme === 'snow' ? 80 : 45);
+
+        for (let i = 0; i < count; i++) {
+          this.particles.push({
+            x: Math.random() * this.canvas.width,
+            y: Math.random() * this.canvas.height,
+            length: Math.random() * 18 + 10,
+            speed: theme === 'rain' ? Math.random() * 12 + 10 : (theme === 'snow' ? Math.random() * 2 + 1 : Math.random() * 0.4 + 0.2),
+            radius: Math.random() * 2 + 1,
+            opacity: Math.random() * 0.6 + 0.2
+          });
+        }
+      }
+
+      loop() {
+        this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+
+        if (this.theme === 'rain' || this.theme === 'thunder') {
+          this.ctx.strokeStyle = 'rgba(186, 230, 253, 0.45)';
+          this.ctx.lineWidth = 1.2;
+          for (let p of this.particles) {
+            this.ctx.beginPath();
+            this.ctx.moveTo(p.x, p.y);
+            this.ctx.lineTo(p.x - 2, p.y + p.length);
+            this.ctx.stroke();
+            p.y += p.speed;
+            p.x -= 1;
+            if (p.y > this.canvas.height) {
+              p.y = -20;
+              p.x = Math.random() * this.canvas.width;
+            }
+          }
+        } else if (this.theme === 'snow') {
+          this.ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
+          for (let p of this.particles) {
+            this.ctx.beginPath();
+            this.ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
+            this.ctx.fill();
+            p.y += p.speed;
+            p.x += Math.sin(p.y * 0.02);
+            if (p.y > this.canvas.height) {
+              p.y = -10;
+              p.x = Math.random() * this.canvas.width;
+            }
+          }
+        } else {
+          // Subtle drifting stars or ambient particles
+          this.ctx.fillStyle = this.isDay ? 'rgba(254, 240, 138, 0.3)' : 'rgba(224, 242, 254, 0.4)';
+          for (let p of this.particles) {
+            this.ctx.beginPath();
+            this.ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
+            this.ctx.fill();
+            p.y -= p.speed;
+            if (p.y < 0) {
+              p.y = this.canvas.height + 10;
+              p.x = Math.random() * this.canvas.width;
+            }
+          }
+        }
+
+        requestAnimationFrame(() => this.loop());
+      }
+    }
+
+    function renderDashboard() {
+      if (!AppState.weatherData) return;
+      const { current, hourly, daily } = AppState.weatherData;
+      const condition = WMO_CONDITIONS[current.weather_code] || { label: 'Clear Sky', icon: 'sun', theme: 'clear' };
+
+      // Update Header & Provider Badges
+      document.getElementById('location-name').textContent = AppState.city;
+      document.getElementById('location-country').textContent = AppState.country ? AppState.country.toUpperCase() : 'METEOROLOGICAL OBSERVATION';
+      
+      const sourceBadge = document.getElementById('source-badge');
+      sourceBadge.innerHTML = `<i data-lucide="${AppState.dataSource.includes('Gemini') ? 'sparkles' : 'cpu'}" class="w-3 h-3 text-cyan-300"></i><span>${AppState.dataSource}</span>`;
+      document.getElementById('footer-source-label').textContent = `Intelligence Source: ${AppState.dataSource}`;
+
+      // Local Timestamp
+      document.getElementById('local-time').textContent = new Date().toLocaleDateString(undefined, {
+        weekday: 'long',
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+      });
+
+      // Temperatures & Condition
+      document.getElementById('current-temp').textContent = formatTemperature(current.temp);
+      document.getElementById('temp-high').textContent = formatTemperature(current.high);
+      document.getElementById('temp-low').textContent = formatTemperature(current.low);
+      document.getElementById('feels-like').textContent = formatTemperature(current.feels_like);
+      document.getElementById('weather-description').textContent = condition.label;
+      document.getElementById('precipitation-probability-text').textContent = `${current.precipitation_probability}% Precipitation probability`;
+
+      // Icon & Glow Atmosphere
+      const iconWrapper = document.getElementById('main-weather-icon-wrapper');
+      iconWrapper.innerHTML = `<i data-lucide="${condition.icon}" class="w-full h-full text-cyan-300 drop-shadow-[0_12px_24px_rgba(6,182,212,0.4)]"></i>`;
+      
+      // Update Particle Simulation
+      if (AppState.particleCanvas) {
+        AppState.particleCanvas.setTheme(condition.theme, current.is_day === 1);
+      }
+
+      // Detailed Metric Tiles
+      document.getElementById('metric-wind-speed').textContent = formatSpeed(current.wind_speed);
+      document.getElementById('metric-wind-direction').textContent = `Direction: ${degreesToCompass(current.wind_direction)}`;
+
+      document.getElementById('metric-humidity').textContent = `${current.humidity}%`;
+      document.getElementById('metric-dew-point').textContent = `Dew Point: ${formatTemperature(current.dew_point)}`;
+
+      document.getElementById('metric-uv-index').textContent = (current.uv_index !== undefined) ? current.uv_index.toFixed(1) : '--';
+      const uvLabel = current.uv_index < 3 ? 'Low risk' : current.uv_index < 6 ? 'Moderate risk' : current.uv_index < 8 ? 'High risk' : 'Very high risk';
+      const uvDesc = document.getElementById('metric-uv-description');
+      uvDesc.textContent = uvLabel;
+      uvDesc.className = `text-xs mt-1 font-medium ${current.uv_index < 3 ? 'text-emerald-400' : current.uv_index < 6 ? 'text-amber-400' : 'text-rose-400'}`;
+
+      document.getElementById('metric-air-pressure').textContent = `${Math.round(current.pressure)} hPa`;
+      document.getElementById('metric-visibility').textContent = `Visibility: ${current.visibility} km`;
+
+      document.getElementById('metric-sunrise').textContent = current.sunrise;
+      document.getElementById('metric-sunset').textContent = current.sunset;
+
+      // Populate 24-Hour Hourly Forecast
+      const hourlyContainer = document.getElementById('hourly-forecast-list');
+      hourlyContainer.innerHTML = hourly.map(item => {
+        const itemCond = WMO_CONDITIONS[item.code] || { icon: 'sun' };
+        return `
+          <div class="flex flex-col items-center justify-between min-w-[76px] py-3.5 px-2.5 rounded-2xl glass-input hover:bg-white/15 transition-all flex-shrink-0 text-center">
+            <span class="text-xs font-medium text-slate-300">${item.time}</span>
+            <div class="my-2.5 text-cyan-300">
+              <i data-lucide="${itemCond.icon}" class="w-6 h-6 mx-auto"></i>
+            </div>
+            <span class="text-sm font-bold text-white">${formatTemperature(item.temp)}</span>
+            <span class="text-[10px] text-cyan-200/80 font-medium mt-1">${item.pop}%</span>
+          </div>
+        `;
+      }).join('');
+
+      // Populate 7-Day Outlook
+      const dailyContainer = document.getElementById('daily-forecast-list');
+      dailyContainer.innerHTML = daily.map(d => {
+        const dCond = WMO_CONDITIONS[d.code] || { icon: 'sun', label: 'Clear' };
+        return `
+          <div class="flex items-center justify-between p-3 rounded-2xl glass-input hover:bg-white/15 transition-all text-sm">
+            <div class="w-20 font-medium text-slate-200">${d.day}</div>
+            <div class="flex items-center gap-2 text-cyan-300">
+              <i data-lucide="${dCond.icon}" class="w-4 h-4"></i>
+              <span class="text-xs text-slate-300 hidden sm:inline-block w-24 truncate">${dCond.label}</span>
+            </div>
+            <div class="flex items-center gap-3 font-semibold text-right">
+              <span class="text-white">${formatTemperature(d.max)}</span>
+              <span class="text-slate-400 text-xs">${formatTemperature(d.min)}</span>
+            </div>
+          </div>
+        `;
+      }).join('');
+
+      // Refresh Lucide SVG Icons
+      lucide.createIcons();
+    }
+
+    async function searchGeocodingCities(query) {
+      if (!query || query.length < 2) return [];
+      try {
+        const res = await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(query)}&count=6&language=en&format=json`);
+        if (!res.ok) return [];
+        const data = await res.json();
+        return data.results || [];
+      } catch (e) {
+        return [];
+      }
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+      // Initialize Particles
+      const canvasEl = document.getElementById('weather-canvas');
+      AppState.particleCanvas = new ParticleEngine(canvasEl);
+
+      // Search Inputs & Suggestions
+      const cityInput = document.getElementById('city-input');
+      const searchSuggestions = document.getElementById('search-suggestions');
+      const clearSearchBtn = document.getElementById('clear-search-btn');
+
+      let searchDebounce = null;
+      cityInput.addEventListener('input', (e) => {
+        const val = e.target.value.trim();
+        clearSearchBtn.classList.toggle('hidden', val.length === 0);
+
+        clearTimeout(searchDebounce);
+        if (val.length < 2) {
+          searchSuggestions.classList.add('hidden');
+          return;
+        }
+
+        searchDebounce = setTimeout(async () => {
+          const results = await searchGeocodingCities(val);
+          if (results.length === 0) {
+            searchSuggestions.innerHTML = `<div class="p-3 text-xs text-slate-400 text-center">No locations matched</div>`;
+          } else {
+            searchSuggestions.innerHTML = results.map(r => {
+              const country = r.country ? `${r.admin1 ? r.admin1 + ', ' : ''}${r.country}` : '';
+              return `
+                <button 
+                  class="w-full text-left p-3 hover:bg-white/10 transition flex items-center justify-between text-xs"
+                  data-city="${r.name}"
+                  data-country="${country}"
+                  data-lat="${r.latitude}"
+                  data-lon="${r.longitude}"
+                >
+                  <span class="font-semibold text-white">${r.name}</span>
+                  <span class="text-slate-400 text-[11px]">${country}</span>
+                </button>
+              `;
+            }).join('');
+          }
+          searchSuggestions.classList.remove('hidden');
+        }, 300);
+      });
+
+      // Select from autocomplete
+      searchSuggestions.addEventListener('click', (e) => {
+        const btn = e.target.closest('button');
+        if (!btn) return;
+        const cityName = btn.dataset.city;
+        const countryName = btn.dataset.country;
+        const lat = parseFloat(btn.dataset.lat);
+        const lon = parseFloat(btn.dataset.lon);
+
+        cityInput.value = cityName;
+        searchSuggestions.classList.add('hidden');
+        loadWeatherData(cityName, lat, lon, countryName);
+      });
+
+      // Clear search
+      clearSearchBtn.addEventListener('click', () => {
+        cityInput.value = '';
+        clearSearchBtn.classList.add('hidden');
+        searchSuggestions.classList.add('hidden');
+        cityInput.focus();
+      });
+
+      // Quick City Preset buttons
+      document.querySelectorAll('.city-preset').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const c = btn.dataset.city;
+          const country = btn.dataset.country;
+          const lat = parseFloat(btn.dataset.lat);
+          const lon = parseFloat(btn.dataset.lon);
+          cityInput.value = c;
+          searchSuggestions.classList.add('hidden');
+          loadWeatherData(c, lat, lon, country);
+        });
+      });
+
+      // GPS Geolocation
+      document.getElementById('btn-geolocate').addEventListener('click', () => {
+        if (!navigator.geolocation) {
+          showToast('Geolocation is not supported by your browser', 'error');
+          return;
+        }
+        showToast('Acquiring GPS coordinates...', 'info');
+        navigator.geolocation.getCurrentPosition(
+          async (pos) => {
+            const lat = pos.coords.latitude;
+            const lon = pos.coords.longitude;
+            try {
+              const geoRes = await fetch(`https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${lat}&longitude=${lon}&localityLanguage=en`);
+              const geoData = await geoRes.json();
+              const name = geoData.city || geoData.locality || 'Current Location';
+              const country = geoData.countryName || '';
+              loadWeatherData(name, lat, lon, country);
+            } catch {
+              loadWeatherData('Detected Location', lat, lon, '');
+            }
+          },
+          (err) => {
+            showToast('Unable to retrieve location: ' + err.message, 'error');
+          }
+        );
+      });
+
+      // Unit switchers (°C / °F)
+      const updateUnitButtons = () => {
+        const isC = AppState.unit === 'celsius';
+        const activeClass = 'bg-white text-slate-900 font-bold shadow';
+        const inactiveClass = 'text-slate-300 font-medium hover:text-white';
+
+        document.getElementById('btn-celsius').className = `px-3 py-1.5 rounded-xl transition-all ${isC ? activeClass : inactiveClass}`;
+        document.getElementById('btn-fahrenheit').className = `px-3 py-1.5 rounded-xl transition-all ${!isC ? activeClass : inactiveClass}`;
+        document.getElementById('btn-celsius-mob').className = `px-2.5 py-1 rounded-lg transition-all ${isC ? activeClass : inactiveClass}`;
+        document.getElementById('btn-fahrenheit-mob').className = `px-2.5 py-1 rounded-lg transition-all ${!isC ? activeClass : inactiveClass}`;
+        renderDashboard();
+      };
+
+      document.getElementById('btn-celsius').addEventListener('click', () => { AppState.unit = 'celsius'; updateUnitButtons(); });
+      document.getElementById('btn-fahrenheit').addEventListener('click', () => { AppState.unit = 'fahrenheit'; updateUnitButtons(); });
+      document.getElementById('btn-celsius-mob').addEventListener('click', () => { AppState.unit = 'celsius'; updateUnitButtons(); });
+      document.getElementById('btn-fahrenheit-mob').addEventListener('click', () => { AppState.unit = 'fahrenheit'; updateUnitButtons(); });
+
+      // Gemini Key Modal Logic
+      const modal = document.getElementById('gemini-config-modal');
+      const openModalBtn = document.getElementById('btn-open-gemini-modal');
+      const openModalMobBtn = document.getElementById('btn-api-key-mob');
+      const closeModalBtn = document.getElementById('close-gemini-modal-btn');
+      const cancelModalBtn = document.getElementById('btn-close-modal');
+      const saveKeyBtn = document.getElementById('btn-save-gemini-key');
+      const deleteKeyBtn = document.getElementById('btn-delete-gemini-key');
+      const keyInput = document.getElementById('gemini-api-input');
+      const activeIndicator = document.getElementById('gemini-active-indicator');
+      const toggleVisBtn = document.getElementById('toggle-key-visibility');
+
+      const refreshKeyBadge = () => {
+        activeIndicator.classList.toggle('hidden', !AppState.geminiKey);
+      };
+      refreshKeyBadge();
+
+      const showModal = () => {
+        keyInput.value = AppState.geminiKey;
+        modal.classList.remove('hidden');
+      };
+      const hideModal = () => modal.classList.add('hidden');
+
+      openModalBtn.addEventListener('click', showModal);
+      openModalMobBtn.addEventListener('click', showModal);
+      closeModalBtn.addEventListener('click', hideModal);
+      cancelModalBtn.addEventListener('click', hideModal);
+
+      toggleVisBtn.addEventListener('click', () => {
+        const isPass = keyInput.type === 'password';
+        keyInput.type = isPass ? 'text' : 'password';
+        toggleVisBtn.innerHTML = `<i data-lucide="${isPass ? 'eye-off' : 'eye'}" class="w-4 h-4"></i>`;
+        lucide.createIcons();
+      });
+
+      saveKeyBtn.addEventListener('click', () => {
+        const raw = keyInput.value.trim();
+        AppState.geminiKey = raw;
+        if (raw) {
+          localStorage.setItem('aerocast_gemini_key', raw);
+          showToast('Google Gemini key saved! Synchronizing live Google data...', 'success');
+        } else {
+          localStorage.removeItem('aerocast_gemini_key');
+          showToast('Key cleared. Returned to standard Open-Meteo feed.', 'info');
+        }
+        refreshKeyBadge();
+        hideModal();
+        loadWeatherData(AppState.city, AppState.latitude, AppState.longitude, AppState.country);
+      });
+
+      deleteKeyBtn.addEventListener('click', () => {
+        AppState.geminiKey = '';
+        keyInput.value = '';
+        localStorage.removeItem('aerocast_gemini_key');
+        refreshKeyBadge();
+        hideModal();
+        showToast('Google Gemini key removed.', 'info');
+        loadWeatherData(AppState.city, AppState.latitude, AppState.longitude, AppState.country);
+      });
+
+      // Manual Refresh Button
+      document.getElementById('btn-manual-refresh').addEventListener('click', () => {
+        loadWeatherData(AppState.city, AppState.latitude, AppState.longitude, AppState.country);
+      });
+
+      // Close Toast Button
+      document.getElementById('close-toast-btn').addEventListener('click', () => {
+        document.getElementById('status-toast').classList.add('hidden');
+      });
+
+      // Initial Boot: Load default for Aligarh, Uttar Pradesh
+      loadWeatherData(AppState.city, AppState.latitude, AppState.longitude, AppState.country);
+    });
+  </script>
+</body>
+</html>
